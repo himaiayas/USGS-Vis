@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Earthquake Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7;
+    --surface-1: #fcfcfb;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --series-1: #2a78d6;
+    --series-1-hover: #5598e7;
+    --critical: #d03b3b;
+    --warning-ink: #8a5a00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page: #0d0d0d; --surface-1: #1a1a19;
+      --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #898781;
+      --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+      --series-1: #3987e5; --series-1-hover: #6da7ec;
+      --warning-ink: #fab219;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface-1: #1a1a19;
+    --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+    --series-1: #3987e5; --series-1-hover: #6da7ec;
+    --warning-ink: #fab219;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--page); color: var(--text-primary);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; font-weight: 650; }
+  h2 { font-size: 14px; margin: 0 0 12px; font-weight: 600; }
+  .sub { color: var(--text-secondary); margin: 0; }
+
+  .filters { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; margin: 20px 0 16px; }
+  .filters label { color: var(--text-secondary); display: flex; gap: 10px; align-items: center; }
+  .filters input[type=range] { width: 220px; accent-color: var(--series-1); }
+  .filters output { color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; min-width: 3.5em; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip { display: inline-flex; gap: 6px; align-items: center; border: 1px solid var(--border);
+          border-radius: 999px; padding: 3px 10px; color: var(--text-secondary); cursor: pointer; user-select: none; }
+  .chip input { margin: 0; accent-color: var(--series-1); }
+
+  .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .tile, .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; }
+  .tile { padding: 14px 16px; }
+  .tile .k { color: var(--text-secondary); font-size: 13px; }
+  .tile .v { font-size: 26px; font-weight: 650; margin-top: 2px; }
+  .tile .d { color: var(--text-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .card { padding: 16px; margin-bottom: 16px; }
+  #map { height: 520px; border-radius: 8px; }
+  .legend { display: flex; align-items: center; gap: 12px; margin-top: 12px; color: var(--text-secondary); font-size: 12px; }
+  .scale { flex: 0 1 360px; }
+  .scale .bar { height: 10px; border-radius: 5px; }
+  .scale .ticks { position: relative; height: 16px; font-variant-numeric: tabular-nums; }
+  .scale .ticks span { position: absolute; top: 3px; transform: translateX(-50%); color: var(--text-muted); }
+  .mag-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 0; }
+  .row2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .tile, .card { min-width: 0; }
+  .row2 .card { margin-bottom: 16px; }
+  .chart { width: 100%; height: 220px; }
+  .chart svg { display: block; overflow: visible; }
+  .chart .bar { fill: var(--series-1); }
+  .chart .hit:hover + .bar, .chart .hit:focus + .bar { fill: var(--series-1-hover); }
+  .chart .hit { fill: transparent; cursor: default; outline: none; }
+  .chart text { fill: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .chart .grid { stroke: var(--grid); stroke-width: 1; }
+  .chart .base { stroke: var(--axis); stroke-width: 1; }
+
+  #tip { position: fixed; pointer-events: none; z-index: 1000; background: var(--surface-1); color: var(--text-primary);
+         border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 12px;
+         box-shadow: 0 4px 16px rgba(0,0,0,0.12); display: none; max-width: 280px; }
+  #tip b { font-size: 14px; display: block; }
+  #tip span { color: var(--text-secondary); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--grid); }
+  th { color: var(--text-secondary); font-weight: 600; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td a { color: var(--series-1); text-decoration: none; }
+  td a:hover { text-decoration: underline; }
+  .table-wrap { overflow-x: auto; }
+  .empty { color: var(--text-muted); padding: 24px 0; text-align: center; }
+
+  .leaflet-container { background: var(--surface-1); font: inherit; }
+  .leaflet-tooltip { background: var(--surface-1); color: var(--text-primary); border: 1px solid var(--border); }
+
+  @media (max-width: 800px) {
+    .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .row2 { grid-template-columns: minmax(0, 1fr); }
+    .filters input[type=range] { width: 160px; }
+    #map { height: 380px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title">Earthquakes</h1>
+  <p class="sub" id="subtitle"></p>
+
+  <div class="filters">
+    <label>Min magnitude
+      <input type="range" id="magFilter" step="0.1">
+      <output id="magOut"></output>
+    </label>
+    <div class="chips" id="depthFilter" aria-label="Depth filter"></div>
+  </div>
+
+  <section class="tiles">
+    <div class="tile"><div class="k">Earthquakes</div><div class="v" id="tCount">–</div><div class="d" id="tCountD"></div></div>
+    <div class="tile"><div class="k">Strongest</div><div class="v" id="tMax">–</div><div class="d" id="tMaxD"></div></div>
+    <div class="tile"><div class="k">M5.0 or larger</div><div class="v" id="tBig">–</div><div class="d" id="tBigD"></div></div>
+    <div class="tile"><div class="k">Median depth</div><div class="v" id="tDepth">–</div><div class="d" id="tDepthD"></div></div>
+  </section>
+
+  <section class="card">
+    <h2>Where they happened</h2>
+    <div id="map"></div>
+    <div class="legend" id="legend"></div>
+  </section>
+
+  <div class="row2">
+    <section class="card"><h2 id="timeTitle">Earthquakes per day</h2><div class="chart" id="timeChart"></div></section>
+    <section class="card"><h2>Magnitude distribution</h2><div class="chart" id="magChart"></div></section>
+  </div>
+
+  <section class="card">
+    <h2 id="tableTitle">Strongest earthquakes</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Time (UTC)</th><th class="num">Mag</th><th class="num">Depth km</th><th>Place</th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table></div>
+  </section>
+</main>
+<div id="tip" role="tooltip"></div>
+
+<script>
+const DATA = __DATA__;
+const F = DATA.filters;
+const DAY = 86400000;
+// Rows arrive column-packed to keep the file small; see DATA.fields.
+const QUAKES = DATA.rows.map(([t, mag, lat, lon, depth, tsunami, id, place]) => ({
+  t, mag, lat, lon, depth, tsunami: !!tsunami, id, place,
+  url: `https://earthquake.usgs.gov/earthquakes/eventpage/${id}`,
+}));
+
+const DEPTH_BANDS = [
+  { key: "shallow", label: "Shallow  <35 km", min: -Infinity, max: 35 },
+  { key: "mid", label: "35–70 km", min: 35, max: 70 },
+  { key: "intermediate", label: "70–300 km", min: 70, max: 300 },
+  { key: "deep", label: "Deep  >300 km", min: 300, max: Infinity },
+];
+const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const bandOf = (d) => DEPTH_BANDS.find((b) => d >= b.min && d < b.max);
+const fmtTime = (ms) => new Date(ms).toISOString().replace("T", " ").slice(0, 16);
+const fmtDate = (ms) => new Date(ms).toISOString().slice(0, 10);
+const el = (id) => document.getElementById(id);
+
+// ---------- header ----------
+el("title").textContent = `Earthquakes · ${F.region_label}`;
+el("subtitle").textContent =
+  `${F.start} → ${F.end} (UTC) · magnitude ${F.min_mag}–${F.max_mag} · ` +
+  `${QUAKES.length.toLocaleString()} events from USGS (complete) · generated ${DATA.generated}`;
+
+// ---------- client-side filters ----------
+// reduce, not Math.min(...arr): spreading 100k+ values overflows the call stack
+const magLo = QUAKES.reduce((a, q) => Math.min(a, q.mag), Infinity);
+const magHi = QUAKES.reduce((a, q) => Math.max(a, q.mag), -Infinity);
+const magFilter = el("magFilter");
+magFilter.min = Math.floor((QUAKES.length ? magLo : F.min_mag) * 10) / 10;
+magFilter.max = Math.ceil((QUAKES.length ? magHi : F.max_mag) * 10) / 10;
+magFilter.value = magFilter.min;
+const activeBands = new Set(DEPTH_BANDS.map((b) => b.key));
+
+for (const b of DEPTH_BANDS) {
+  const lab = document.createElement("label");
+  lab.className = "chip";
+  const cb = document.createElement("input");
+  cb.type = "checkbox"; cb.checked = true;
+  cb.addEventListener("change", () => { cb.checked ? activeBands.add(b.key) : activeBands.delete(b.key); render(); });
+  lab.append(cb, document.createTextNode(b.label));
+  el("depthFilter").append(lab);
+}
+let magTimer;
+magFilter.addEventListener("input", () => {
+  el("magOut").textContent = `M${parseFloat(magFilter.value).toFixed(1)}+`;
+  clearTimeout(magTimer);
+  magTimer = setTimeout(render, QUAKES.length > 20000 ? 250 : 60);
+});
+
+function filtered() {
+  const min = parseFloat(magFilter.value);
+  return QUAKES.filter((q) => q.mag >= min && activeBands.has(bandOf(q.depth).key));
+}
+
+// ---------- tooltip ----------
+const tip = el("tip");
+function showTip(evt, value, lines) {
+  tip.replaceChildren();
+  const b = document.createElement("b"); b.textContent = value; tip.append(b);
+  for (const l of lines) { const s = document.createElement("span"); s.textContent = l; tip.append(s, document.createElement("br")); }
+  tip.style.display = "block";
+  const r = evt.target.getBoundingClientRect?.();
+  const x = evt.clientX ?? (r.left + r.width / 2), y = evt.clientY ?? r.top;
+  const w = tip.offsetWidth;
+  tip.style.left = Math.min(window.innerWidth - w - 8, Math.max(8, x + 12)) + "px";
+  tip.style.top = Math.max(8, y - tip.offsetHeight - 12) + "px";
+}
+const hideTip = () => { tip.style.display = "none"; };
+
+// ---------- map ----------
+const dark = matchMedia("(prefers-color-scheme: dark)").matches && document.documentElement.dataset.theme !== "light"
+  || document.documentElement.dataset.theme === "dark";
+// Canvas renderer: SVG gets sluggish past a few thousand markers.
+const map = L.map("map", { worldCopyJump: true, minZoom: 1, preferCanvas: true });
+const base = dark ? "World_Dark_Gray_Base" : "World_Light_Gray_Base";
+L.tileLayer(`https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/${base}/MapServer/tile/{z}/{y}/{x}`, {
+  attribution: 'Tiles &copy; Esri, HERE, Garmin, &copy; OpenStreetMap contributors · data <a href="https://earthquake.usgs.gov/">USGS</a>',
+  maxZoom: 16,
+}).addTo(map);
+if (F.bbox) {
+  const [s, n, w, e] = F.bbox;
+  map.fitBounds([[s, w], [n, e]]);
+} else {
+  map.setView([15, 150], 2);
+}
+const layer = L.layerGroup().addTo(map);
+
+function drawMap(qs) {
+  layer.clearLayers();
+  const ring = cssVar("--surface-1");
+  const r = qs.length > 20000 ? 3 : qs.length > 2000 ? 4 : 5;
+  // Weakest first, so the strongest quakes are drawn last and stay on top.
+  for (const q of [...qs].sort((a, b) => a.mag - b.mag)) {
+    // World view is centred on the Pacific (lon 150); move the Americas onto that copy of the map.
+    const lon = !F.bbox && q.lon < -30 ? q.lon + 360 : q.lon;
+    const m = L.circleMarker([q.lat, lon], {
+      radius: r, color: ring, weight: 0.5,
+      fillColor: magColor(q.mag), fillOpacity: 0.9,
+    });
+    // Built on hover only; formatting 100k tooltips up front stalls the page.
+    m.bindTooltip(() => `<b>M${q.mag.toFixed(1)}</b> ${escapeHtml(q.place)}<br>${fmtTime(q.t)} UTC · ${q.depth.toFixed(0)} km deep${q.tsunami ? " · tsunami flag" : ""}`);
+    m.on("click", () => window.open(q.url, "_blank", "noopener"));
+    layer.addLayer(m);
+  }
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// ---------- magnitude colour scale ----------
+// Turbo colormap (Google's improved "jet"): blue -> cyan -> green -> yellow -> red.
+// Polynomial fit from https://gist.github.com/mikhailov-work/0d177465a8151eb6ede1768d51d476c7
+function turbo(t) {
+  const c = (v) => Math.round(Math.max(0, Math.min(255, v)));
+  const r = 34.61 + t * (1172.33 - t * (10793.56 - t * (33300.12 - t * (38394.49 - t * 14825.05))));
+  const g = 23.31 + t * (557.33 + t * (1225.33 - t * (3574.96 - t * (1073.77 + t * 707.56))));
+  const b = 27.2 + t * (3211.1 - t * (15327.97 - t * (27814 - t * (22569.18 - t * 6838.66))));
+  return `rgb(${c(r)},${c(g)},${c(b)})`;
+}
+// One scale for the whole dataset, so filtering never repaints the remaining dots.
+// Trim turbo's dark ends so the scale starts at blue and ends at red.
+const SCALE_LO = Math.floor((QUAKES.length ? magLo : F.min_mag) * 2) / 2;
+const SCALE_HI = Math.max(SCALE_LO + 0.5, Math.ceil((QUAKES.length ? magHi : F.max_mag) * 2) / 2);
+const magColor = (m) => turbo(0.1 + 0.82 * Math.min(1, Math.max(0, (m - SCALE_LO) / (SCALE_HI - SCALE_LO))));
+
+(function legend() {
+  const lg = el("legend");
+  const title = document.createElement("span");
+  title.textContent = "Magnitude";
+  const scale = document.createElement("div");
+  scale.className = "scale";
+  const bar = document.createElement("div");
+  bar.className = "bar";
+  const stops = Array.from({ length: 11 }, (_, i) => magColor(SCALE_LO + (i / 10) * (SCALE_HI - SCALE_LO)));
+  bar.style.background = `linear-gradient(to right, ${stops.join(",")})`;
+  const ticks = document.createElement("div");
+  ticks.className = "ticks";
+  const span = SCALE_HI - SCALE_LO;
+  const step = span > 6 ? 2 : span > 3 ? 1 : 0.5;
+  for (let m = Math.ceil(SCALE_LO / step) * step; m <= SCALE_HI + 1e-9; m += step) {
+    const t = document.createElement("span");
+    t.style.left = `${((m - SCALE_LO) / span) * 100}%`;
+    t.textContent = Number.isInteger(m) ? m : m.toFixed(1);
+    ticks.append(t);
+  }
+  scale.append(bar, ticks);
+  lg.append(title, scale);
+})();
+
+// ---------- bar chart ----------
+function barChart(container, bins, { xLabel, tipLines }) {
+  container.replaceChildren();
+  const W = container.clientWidth, H = container.clientHeight;
+  const pad = { l: 36, r: 8, t: 8, b: 24 };
+  const iw = W - pad.l - pad.r, ih = H - pad.t - pad.b;
+  const max = Math.max(1, ...bins.map((b) => b.value));
+  const step = niceStep(max);
+  const top = Math.ceil(max / step) * step;
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("width", W); svg.setAttribute("height", H);
+  const mk = (tag, attrs, parent = svg) => {
+    const n = document.createElementNS(ns, tag);
+    for (const k in attrs) n.setAttribute(k, attrs[k]);
+    parent.append(n); return n;
+  };
+  const y = (v) => pad.t + ih - (v / top) * ih;
+
+  for (let v = 0; v <= top; v += step) {
+    mk("line", { x1: pad.l, x2: W - pad.r, y1: y(v), y2: y(v), class: v === 0 ? "base" : "grid" });
+    mk("text", { x: pad.l - 6, y: y(v) + 4, "text-anchor": "end" }).textContent = v;
+  }
+
+  const bw = iw / bins.length;
+  const gap = Math.min(2, bw * 0.25);
+  const labelEvery = Math.ceil(bins.length / Math.max(1, Math.floor(iw / 72)));
+  bins.forEach((b, i) => {
+    const x = pad.l + i * bw;
+    const hit = mk("rect", { x, y: pad.t, width: bw, height: ih, class: "hit", tabindex: 0 });
+    const h = Math.max(0, y(0) - y(b.value));
+    if (h > 0) {
+      const r = Math.min(4, (bw - gap) / 2, h);
+      const x0 = x + gap / 2, x1 = x + bw - gap / 2, y0 = y(b.value), yb = y(0);
+      // rounded data-end, square at the baseline
+      mk("path", { class: "bar", d: `M${x0},${yb}V${y0 + r}Q${x0},${y0} ${x0 + r},${y0}H${x1 - r}Q${x1},${y0} ${x1},${y0 + r}V${yb}Z` });
+    } else {
+      mk("rect", { class: "bar", x, y: 0, width: 0, height: 0 });
+    }
+    const on = (e) => showTip(e, `${b.value.toLocaleString()} earthquakes`, tipLines(b));
+    hit.addEventListener("pointermove", on);
+    hit.addEventListener("focus", on);
+    hit.addEventListener("pointerleave", hideTip);
+    hit.addEventListener("blur", hideTip);
+    if (i % labelEvery === 0) {
+      mk("text", { x: x + bw / 2, y: H - 6, "text-anchor": "middle" }).textContent = b.label;
+    }
+  });
+  container.append(svg);
+}
+function niceStep(max) {
+  const raw = max / 4, p = Math.pow(10, Math.floor(Math.log10(raw)));
+  return [1, 2, 5, 10].map((m) => m * p).find((s) => s >= raw) || p;
+}
+
+function timeBins(qs) {
+  const start = Date.parse(F.start + "T00:00:00Z");
+  const end = Date.parse(F.end + "T00:00:00Z") + DAY;
+  const days = Math.round((end - start) / DAY);
+  const unit = days > 730 ? "month" : days > 92 ? "week" : "day";
+  el("timeTitle").textContent = `Earthquakes per ${unit}`;
+  const iso = (t) => new Date(t).toISOString();
+  const bins = [];
+  if (unit === "month") {
+    const d = new Date(start);
+    for (let y = d.getUTCFullYear(), m = d.getUTCMonth(); Date.UTC(y, m) < end; m++) {
+      const t = Date.UTC(y, m);
+      bins.push({ t, value: 0, label: iso(t).slice(0, 7) });
+    }
+  } else {
+    const step = (unit === "week" ? 7 : 1) * DAY;
+    // Show the year once the range crosses one, so "03-01" is never ambiguous.
+    const multiYear = new Date(start).getUTCFullYear() !== new Date(end - 1).getUTCFullYear();
+    for (let t = start; t < end; t += step) {
+      bins.push({ t, value: 0, label: multiYear ? iso(t).slice(0, 10) : iso(t).slice(5, 10) });
+    }
+  }
+  // Bin starts are ascending, so a binary search finds each event's bin.
+  for (const q of qs) {
+    let lo = 0, hi = bins.length - 1;
+    if (q.t < bins[0].t) continue;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      bins[mid].t <= q.t ? (lo = mid) : (hi = mid - 1);
+    }
+    if (q.t < end) bins[lo].value++;
+  }
+  bins.unit = unit;
+  return bins;
+}
+function magBins(qs) {
+  const lo = Math.floor(parseFloat(magFilter.min) * 2) / 2;
+  const hi = Math.max(lo + 0.5, Math.ceil(parseFloat(magFilter.max) * 2) / 2);
+  const bins = [];
+  for (let m = lo; m < hi - 1e-9; m += 0.5) bins.push({ lo: m, value: 0, label: m.toFixed(1) });
+  for (const q of qs) {
+    const i = Math.min(bins.length - 1, Math.floor((q.mag - lo) / 0.5));
+    if (i >= 0) bins[i].value++;
+  }
+  return bins;
+}
+
+// ---------- tiles & table ----------
+function median(xs) {
+  if (!xs.length) return null;
+  const s = [...xs].sort((a, b) => a - b), m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+function drawTiles(qs) {
+  const strongest = qs.reduce((a, q) => (!a || q.mag > a.mag ? q : a), null);
+  const big = qs.filter((q) => q.mag >= 5);
+  const med = median(qs.map((q) => q.depth));
+  el("tCount").textContent = qs.length.toLocaleString();
+  el("tCountD").textContent = qs.length === QUAKES.length ? "all fetched events" : `of ${QUAKES.length.toLocaleString()} fetched`;
+  el("tMax").textContent = strongest ? `M${strongest.mag.toFixed(1)}` : "–";
+  el("tMaxD").textContent = strongest ? strongest.place : "";
+  el("tBig").textContent = big.length.toLocaleString();
+  el("tBigD").textContent = qs.length ? `${((big.length / qs.length) * 100).toFixed(1)}% of shown` : "";
+  el("tDepth").textContent = med === null ? "–" : `${med.toFixed(0)} km`;
+  el("tDepthD").textContent = med === null ? "" : bandOf(med).label.replace(/\s+/g, " ");
+}
+function drawTable(qs) {
+  const tb = el("tbody");
+  tb.replaceChildren();
+  const top = [...qs].sort((a, b) => b.mag - a.mag).slice(0, 50);
+  el("tableTitle").textContent = top.length < qs.length ? `Strongest 50 earthquakes` : "All earthquakes, strongest first";
+  if (!top.length) {
+    const tr = tb.insertRow(), td = tr.insertCell();
+    td.colSpan = 4; td.className = "empty"; td.textContent = "No earthquakes match these filters.";
+    return;
+  }
+  for (const q of top) {
+    const tr = tb.insertRow();
+    tr.insertCell().textContent = fmtTime(q.t);
+    const m = tr.insertCell(), dot = document.createElement("i");
+    m.className = "num"; dot.className = "mag-dot"; dot.style.background = magColor(q.mag);
+    m.append(dot, document.createTextNode(q.mag.toFixed(1)));
+    const d = tr.insertCell(); d.className = "num"; d.textContent = q.depth.toFixed(0);
+    const p = tr.insertCell(), a = document.createElement("a");
+    a.href = q.url; a.target = "_blank"; a.rel = "noopener"; a.textContent = q.place;
+    p.append(a);
+  }
+}
+
+// ---------- render ----------
+let current = [];
+function render() {
+  el("magOut").textContent = `M${parseFloat(magFilter.value).toFixed(1)}+`;
+  current = filtered();
+  drawTiles(current);
+  drawMap(current);
+  drawTable(current);
+  drawCharts(current);
+}
+function drawCharts(qs) {
+  const tb = timeBins(qs);
+  barChart(el("timeChart"), tb, {
+    tipLines: (b) => [tb.unit === "day" ? fmtDate(b.t) : tb.unit === "week" ? `week of ${fmtDate(b.t)}` : fmtDate(b.t).slice(0, 7)],
+  });
+  barChart(el("magChart"), magBins(qs), {
+    tipLines: (b) => [`magnitude ${b.lo.toFixed(1)}–${(b.lo + 0.5).toFixed(1)}`],
+  });
+}
+render();
+let resizeTimer;
+window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => drawCharts(current), 150); });
+</script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+[project]
+name = "airflow"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Phumipas Namjaidee", email = "phumihimal@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "apache-airflow>=3.3.2",
+]
+
+[project.scripts]
+airflow = "airflow:main"
+
+[build-system]
+requires = ["uv_build>=0.12.21,<0.13.0"]
+build-backend = "uv_build"
